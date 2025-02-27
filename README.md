@@ -29,26 +29,26 @@ A friendly Telegram bot that provides personalized book recommendations based on
 
 2. **Configure Application Properties:**
 
-   Edit the `src/main/resources/application.yaml` file to include your API keys and other configuration values. For example:
+Create a file at src/main/resources/application.yaml with the following content. Replace the placeholder values with your actual tokens and API keys:
 
-   ```yaml
-   bot:
-     token: YOUR_TELEGRAM_BOT_TOKEN
+```yaml
+bot:
+  token: YOUR_TELEGRAM_BOT_TOKEN
 
-   openai:
-     api:
-       key: YOUR_OPENAI_API_KEY
-       transcription:
-         url: https://api.openai.com/v1/audio/transcriptions
-         model: whisper-1
-         language: ru
-       chat:
-         url: https://api.openai.com/v1/chat/completions
-         model: gpt-4o
-         system_role: "You are a knowledgeable and friendly book recommendation assistant. Your task is to provide personalized book suggestions based on users' interests, reading habits, and preferred genres. In addition to popular titles, you should also advise unique and lesser-known books that offer fresh perspectives and hidden gems. Ask clarifying questions when needed, and offer diverse recommendations that cater to different tastes and literary styles."
-   book:
-     max-questions: 3
-   ```
+openai:
+  api:
+    key: YOUR_OPENAI_API_KEY
+    transcription:
+      url: https://api.openai.com/v1/audio/transcriptions
+      model: whisper-1
+      language: en
+    chat:
+      url: https://api.openai.com/v1/chat/completions
+      model: gpt-4o
+      system_role: "You are a knowledgeable and friendly book recommendation assistant. Your task is to provide personalized book suggestions based on users' interests, reading habits, and preferred genres. In addition to popular titles, you should also advise unique and lesser-known books that offer fresh perspectives and hidden gems. Ask clarifying questions when needed, and offer diverse recommendations that cater to different tastes and literary styles."
+book:
+  max-questions: 3
+```
 
 3. **Build and Run:**
 
