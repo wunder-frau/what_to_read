@@ -44,3 +44,4 @@ bin/
 build
 
 token.txt
+src/main/resources/application.yaml

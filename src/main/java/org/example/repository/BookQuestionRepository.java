@@ -58,10 +58,6 @@ public class BookQuestionRepository {
         "How important is originality to you in a book recommendation?"
     );
 
-    public List<String> getAllQuestions() {
-        return questions;
-    }
-
     public String getRandomQuestion () {
         return questions.get((int) (Math.random() * questions.size()));
     }

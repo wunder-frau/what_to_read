@@ -1,5 +1,7 @@
 package org.example.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.meta.api.methods.GetFile;
@@ -21,6 +23,8 @@ import java.util.Deque;
 @Component
 public class VoiceCommand extends Command {
 
+    private static final Logger logger = LoggerFactory.getLogger(VoiceCommand.class);
+
     private static final String QUESTION_PROMPT = """
                 Here is the baseline question for our book recommendation session: %s
                 Please ask this question creatively by setting up a real-life scenario involving a well-known book or reading platform.
@@ -34,6 +38,7 @@ public class VoiceCommand extends Command {
                 Speak like an old friend—warm, relaxed, and to the point. Keep your sentences clear and lively, ensuring the conversation
                 remains interesting without overwhelming the customer with too much text.
                 """;
+
     private static final String FEEDBACK_PROMPT = """
                  Analyze the questions asked during this book recommendation session along with the user's responses.
                 Provide personalized feedback on their reading preferences by highlighting what you've learned about their tastes.
@@ -55,37 +60,52 @@ public class VoiceCommand extends Command {
     @Value("${book.max-questions}")
     private int maxQuestions;
 
-    private final BookQuestionRepository bookQuestionRepository;
-    private final OpenAiClient openAiClient;
-    private final DiscussionRepository discussionRepository;
-
     public VoiceCommand(OpenAiClient openAiClient,
                         DiscussionRepository discussionRepository,
                         BookQuestionRepository bookQuestionRepository) {
         super(bookQuestionRepository, openAiClient, discussionRepository);
-        this.bookQuestionRepository = bookQuestionRepository;
-        this.openAiClient = openAiClient;
-        this.discussionRepository = discussionRepository;
     }
 
     @Override
     public boolean isApplicable(Update update) {
-        return update.getMessage().hasVoice();
+        boolean applicable = update.getMessage().hasVoice();
+        logger.info("VoiceCommand.isApplicable: update has voice = {}", applicable);
+        return applicable;
     }
 
     @Override
     public String process(Update update, Bot bot) {
-        String answer = transcribeVoiceAnswer(update, bot);
         String userName = update.getMessage().getFrom().getUserName();
-        discussionRepository.addAnswer(userName, answer);
-        if (discussionRepository.getUserQuestions(userName) == maxQuestions) {
+        logger.info("Processing voice command for user: {}", userName);
+        
+        // Transcribe the voice message
+        String answer = transcribeVoiceAnswer(update, bot);
+        logger.info("Transcribed answer for user {}: {}", userName, answer);
+        
+        // Attempt to add the answer to the active session
+        try {
+            discussionRepository.addAnswer(userName, answer);
+            logger.info("Answer added for user: {}", userName);
+        } catch (IllegalStateException ex) {
+            logger.error("Error adding answer for user {}: {}", userName, ex.getMessage());
+            // Inform user to start a session
+            return "It seems you haven't started a session yet. Please send /start to begin a book recommendation session.";
+        }
+        
+        int currentCount = discussionRepository.getUserQuestions(userName);
+        logger.info("Current question count for user {}: {}", userName, currentCount);
+        
+        if (currentCount == maxQuestions) {
+            logger.info("Maximum questions reached for user {}. Providing feedback.", userName);
             return provideFeedback(userName);
         } else {
+            logger.info("Asking next question for user {}.", userName);
             return askNextQuestion(userName);
         }
     }
 
     private String transcribeVoiceAnswer(Update update, Bot bot) {
+        logger.info("Starting transcription process for voice message.");
         Voice voice = update.getMessage().getVoice();
         String fileId = voice.getFileId();
         java.io.File audio;
@@ -93,30 +113,45 @@ public class VoiceCommand extends Command {
             GetFile getFileRequest = new GetFile();
             getFileRequest.setFileId(fileId);
             File file = bot.execute(getFileRequest);
+            logger.info("Retrieved file path: {}", file.getFilePath());
             audio = bot.downloadFile(file.getFilePath());
+            logger.info("Downloaded audio file: {}", audio.getAbsolutePath());
         } catch (TelegramApiException e) {
-            throw new IllegalStateException("There's an error when processing Telegram audio", e);
+            logger.error("Error processing Telegram audio", e);
+            throw new IllegalStateException("Error processing Telegram audio", e);
         }
-        return openAiClient.transcribe(renameToOgg(audio));
+        java.io.File oggFile = renameToOgg(audio);
+        logger.info("Renamed audio file to OGG: {}", oggFile.getAbsolutePath());
+        String transcript = openAiClient.transcribe(oggFile);
+        logger.info("Transcription result: {}", transcript);
+        return transcript;
     }
 
     private java.io.File renameToOgg(java.io.File tmpFile) {
+        logger.info("Renaming file {} to OGG format.", tmpFile.getName());
         String fileName = tmpFile.getName();
         String newFileName = fileName.substring(0, fileName.length() - 4) + ".ogg";
         Path sourcePath = tmpFile.toPath();
         Path targetPath = sourcePath.resolveSibling(newFileName);
         try {
             Files.move(sourcePath, targetPath);
+            logger.info("File renamed successfully to: {}", targetPath.toString());
         } catch (IOException e) {
-            throw new IllegalStateException("There was an error when renaming .tmp audio file to .ogg", e);
+            logger.error("Error renaming file to .ogg", e);
+            throw new IllegalStateException("Error renaming .tmp audio file to .ogg", e);
         }
         return targetPath.toFile();
     }
 
     private String askNextQuestion(String userName) {
-        String prompt = String.format(QUESTION_PROMPT, bookQuestionRepository.getRandomQuestion());
+        String randomQuestion = bookQuestionRepository.getRandomQuestion();
+        logger.info("Random question retrieved: {}", randomQuestion);
+        String prompt = String.format(QUESTION_PROMPT, randomQuestion);
+        logger.info("Generated prompt: {}", prompt);
         String question = openAiClient.promptModel(prompt);
+        logger.info("OpenAI response for question: {}", question);
         discussionRepository.addQuestion(userName, question);
+        logger.info("Question added for user: {}", userName);
         return question;
     }
 
@@ -124,10 +159,16 @@ public class VoiceCommand extends Command {
         StringBuilder feedbackPrompt = new StringBuilder();
         feedbackPrompt.append(FEEDBACK_PROMPT);
         Deque<Question> questions = discussionRepository.finishInterview(userName);
-        questions.forEach(question -> feedbackPrompt.append("Original question: ")
+        logger.info("Finishing session for user {}. Total questions answered: {}", userName, questions.size());
+        questions.forEach(question -> {
+            feedbackPrompt.append("Original question: ")
                 .append(question.getQuestion()).append("\n")
                 .append("User's answer: ")
-                .append(question.getAnswer()).append("\n"));
-        return openAiClient.promptModel(feedbackPrompt.toString());
+                .append(question.getAnswer()).append("\n");
+        });
+        logger.info("Feedback prompt constructed: {}", feedbackPrompt.toString());
+        String feedback = openAiClient.promptModel(feedbackPrompt.toString());
+        logger.info("Received feedback from OpenAI: {}", feedback);
+        return feedback;
     }
 }
